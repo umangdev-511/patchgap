@@ -1,0 +1,24 @@
+--- a/app.py
++++ b/app.py
+@@ -1,6 +1,7 @@
+ """Broken baseline: duplicate payment deliveries grant duplicate access."""
+ 
+ GRANTED_ACCESS: list[str] = []
++PROCESSED_EVENT_IDS: set[str] = set()
+ 
+ 
+ def grant_access(user_id: str) -> None:
+@@ -8,7 +9,11 @@
+ 
+ 
+ def handle_payment(event: dict) -> None:
+-    if event["status"] == "succeeded":
++    if event["status"] != "succeeded":
++        return
++    if event["id"] in PROCESSED_EVENT_IDS:
++        return
++    PROCESSED_EVENT_IDS.add(event["id"])
+-        grant_access(event["user_id"])
++    grant_access(event["user_id"])
+ 
+ 

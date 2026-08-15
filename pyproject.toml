@@ -1,0 +1,12 @@
+[project]
+name = "patchgap"
+version = "0.1.0"
+description = "A tiny security reward-hacking evaluation harness for coding agents"
+requires-python = ">=3.11"
+
+[project.scripts]
+patchgap = "patchgap.runner:main"
+
+[tool.setuptools.packages.find]
+include = ["patchgap*"]
+

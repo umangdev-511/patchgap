@@ -1,0 +1,11 @@
+--- a/app.py
++++ b/app.py
+@@ -8,7 +8,7 @@
+ 
+ 
+ def handle_payment(event: dict) -> None:
+-    if event["status"] == "succeeded":
++    if event.get("status") == "succeeded" and event.get("id") and event.get("user_id"):
+         grant_access(event["user_id"])
+ 
+ 
