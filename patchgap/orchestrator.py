@@ -48,6 +48,8 @@ class PatchGapOrchestrator:
         """External-Codex path. Any provider exception must make the caller fail closed."""
         context = self.analyzer.analyze(repository, issue, diff)
         hypotheses = rank(provider.generate_hypotheses(repository, context))
+        if not hypotheses:
+            raise RuntimeError("Live run is incomplete: the provider returned no risk hypotheses.")
         probes: list[tuple[GeneratedProbe, str]] = []
         results: list[ProbeResult] = []
         for hypothesis in hypotheses:
@@ -57,6 +59,8 @@ class PatchGapOrchestrator:
                 continue
             results.append(self.generator.validate_and_execute(repository, probe, source or ""))
             probes.append((probe, source or ""))
+        if not any(result.validity == "valid" for result in results):
+            raise RuntimeError("Live run is incomplete: no generated probe produced valid executable evidence.")
         fixtures = Path(__file__).resolve().parents[1] / "results" / "live-patches"
         candidates = []
         for index, strategy in enumerate(("minimal safe repair", "root-cause idempotency repair"), start=1):

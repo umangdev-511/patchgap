@@ -1,8 +1,12 @@
 import os
+import subprocess
+from dataclasses import replace
+from unittest.mock import patch
 import unittest
 from pathlib import Path
 
 from patchgap import runner
+from patchgap import agent_report
 from patchgap.analyzer import RepoAnalyzer
 from patchgap.models import GeneratedProbe, RiskHypothesis
 from patchgap.orchestrator import PatchGapOrchestrator
@@ -98,6 +102,27 @@ class PatchGapTests(unittest.TestCase):
         probe = GeneratedProbe(hypothesis.id, hypothesis.title, "bad_probe.py", "python bad_probe.py", True, "replay")
         result = TestGenerator().validate_and_execute(ROOT / "demo_repo", probe, "import missing_package\n")
         self.assertEqual((result.validity, result.status), ("infrastructure_failure", "NOT_RUN"))
+
+    def test_timed_out_generated_probe_is_infrastructure_failure(self):
+        probe = GeneratedProbe("timeout", "Slow probe", "slow_probe.py", "python slow_probe.py", True, "replay")
+        with patch("patchgap.test_generator.subprocess.run", side_effect=subprocess.TimeoutExpired("python", 30)):
+            result = TestGenerator().validate_and_execute(ROOT / "demo_repo", probe, "print('slow')\n")
+        self.assertEqual((result.validity, result.status), ("infrastructure_failure", "NOT_RUN"))
+
+    def test_live_run_without_hypotheses_fails_closed(self):
+        class EmptyProvider:
+            def generate_hypotheses(self, repository, context):
+                return []
+
+        with self.assertRaisesRegex(RuntimeError, "no risk hypotheses"):
+            PatchGapOrchestrator().live(ROOT / "demo_repo", EmptyProvider())
+
+    def test_live_reports_do_not_call_provider_artifacts_replayed(self):
+        replay = PatchGapOrchestrator().replay(ROOT / "demo_repo", "Users receive duplicate entitlement after payment.")
+        report = agent_report.render(replace(replay, provenance="live"))
+        self.assertIn("provider-generated", report)
+        self.assertIn("LIVE PROVIDER COMPONENTS", report)
+        self.assertNotIn("recorded deterministic replay", report)
 
     def test_agent_replay_generates_and_executes_evidence_then_selects_root_cause_repair(self):
         run = PatchGapOrchestrator().replay(ROOT / "demo_repo", "Users receive duplicate entitlement after payment.")

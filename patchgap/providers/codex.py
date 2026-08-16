@@ -19,9 +19,12 @@ class CodexProvider:
             environment.pop(key, None)
         command = ["codex", "exec", "--ephemeral", "--sandbox", "workspace-write", "--skip-git-repo-check",
                    "--ignore-user-config", "--ignore-rules", "-C", str(workspace), prompt]
-        process = subprocess.run(command, cwd=workspace, env=environment, stdin=subprocess.DEVNULL,
-                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300,
-                                 start_new_session=True, close_fds=True)
+        try:
+            process = subprocess.run(command, cwd=workspace, env=environment, stdin=subprocess.DEVNULL,
+                                     text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300,
+                                     start_new_session=True, close_fds=True)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"Codex trial could not complete: {error}") from error
         if process.returncode:
             raise RuntimeError(f"Codex exited {process.returncode}: {(process.stderr or process.stdout)[-300:]}")
         return process.stdout.strip()
@@ -38,11 +41,28 @@ possible. Do not edit files or mention hidden tests."""
             data = json.loads(raw)
             if not isinstance(data, list):
                 raise ValueError("Codex did not return a JSON array")
-            return [RiskHypothesis(
-                str(item["id"]), str(item["category"]), str(item["title"]), str(item["explanation"]),
-                str(item["severity"]), str(item["confidence"]), list(item["target_files"]),
-                str(item["verification_strategy"]), "live",
-            ) for item in data]
+            if not data:
+                raise ValueError("Codex returned no risk hypotheses")
+            hypotheses = []
+            for item in data:
+                if not isinstance(item, dict):
+                    raise ValueError("Codex returned a non-object hypothesis")
+                category, severity, confidence = (item.get("category"), item.get("severity"), item.get("confidence"))
+                targets = item.get("target_files")
+                if category not in {"behavior", "security", "regression"}:
+                    raise ValueError("Codex returned an invalid hypothesis category")
+                if severity not in {"high", "medium", "low"} or confidence not in {"high", "medium", "low"}:
+                    raise ValueError("Codex returned an invalid severity or confidence")
+                if not isinstance(targets, list) or not all(isinstance(path, str) for path in targets):
+                    raise ValueError("Codex returned invalid target_files")
+                try:
+                    hypotheses.append(RiskHypothesis(
+                        str(item["id"]), category, str(item["title"]), str(item["explanation"]),
+                        severity, confidence, targets, str(item["verification_strategy"]), "live",
+                    ))
+                except KeyError as error:
+                    raise ValueError(f"Codex omitted required hypothesis field: {error.args[0]}") from error
+            return hypotheses
         finally:
             import shutil
             shutil.rmtree(workspace, ignore_errors=True)

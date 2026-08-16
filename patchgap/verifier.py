@@ -15,10 +15,13 @@ DEMO_REPO = ROOT / "demo_repo"
 
 
 def _run_tests(workspace: Path, filename: str) -> tuple[bool, str]:
-    process = subprocess.run(
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", filename, "-v"],
-        cwd=workspace, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30,
-    )
+    try:
+        process = subprocess.run(
+            [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", filename, "-v"],
+            cwd=workspace, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"{filename} timed out after 30 seconds."
     return process.returncode == 0, process.stdout
 
 
@@ -27,10 +30,14 @@ def evaluate_patch(name: str, patch_file: Path, provenance: str) -> CandidateRes
     workspace = Path(tempfile.mkdtemp(prefix="patchgap-candidate-"))
     try:
         shutil.copytree(DEMO_REPO, workspace, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
-        applied = subprocess.run(
-            ["patch", "-p1", "-i", str(patch_file.resolve())], cwd=workspace, text=True,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15,
-        )
+        try:
+            applied = subprocess.run(
+                ["patch", "-p1", "-i", str(patch_file.resolve())], cwd=workspace, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15,
+            )
+        except subprocess.TimeoutExpired:
+            return CandidateResult(name, False, False, False, False,
+                                   "Patch application timed out.", provenance)
         if applied.returncode:
             return CandidateResult(name, False, False, False, False,
                                    f"Patch did not apply cleanly: {applied.stdout.strip()}", provenance)
@@ -73,8 +80,11 @@ def evaluate_repair(repository: Path, candidate: RepairCandidate, probes: list[t
     """Evaluate a repair on a protected copy with public tests and independently generated probes."""
     workspace = protected_copy(repository)
     try:
-        applied = subprocess.run(["patch", "-p1", "-i", str(Path(candidate.patch_file).resolve())], cwd=workspace,
-                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15)
+        try:
+            applied = subprocess.run(["patch", "-p1", "-i", str(Path(candidate.patch_file).resolve())], cwd=workspace,
+                                     text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15)
+        except subprocess.TimeoutExpired:
+            return RepairResult(candidate, False, [], False, "Patch application timed out.")
         if applied.returncode:
             return RepairResult(candidate, False, [], False, f"Patch did not apply: {applied.stdout.strip()}")
         existing = _run_tests(workspace, "test_visible.py")[0] and _run_tests(workspace, "test_regression.py")[0]
@@ -82,8 +92,13 @@ def evaluate_repair(repository: Path, candidate: RepairCandidate, probes: list[t
         for probe, source in probes:
             path = workspace / probe.test_file
             path.write_text(source)
-            process = subprocess.run([sys.executable, path.name], cwd=workspace, text=True,
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+            try:
+                process = subprocess.run([sys.executable, path.name], cwd=workspace, text=True,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+            except subprocess.TimeoutExpired:
+                results.append(ProbeResult(probe.hypothesis_id, probe.name, "infrastructure_failure", "NOT_RUN",
+                                           "Generated probe timed out after 30 seconds."))
+                continue
             if process.returncode == 0:
                 results.append(ProbeResult(probe.hypothesis_id, probe.name, "valid", "PASS", "Invariant held."))
             elif "AssertionError" in process.stdout or "FAIL" in process.stdout:

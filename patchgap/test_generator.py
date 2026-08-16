@@ -33,8 +33,12 @@ class TestGenerator:
             shutil.copytree(repository, workspace, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
             target = workspace / probe.test_file
             target.write_text(source)
-            process = subprocess.run([sys.executable, target.name], cwd=workspace, text=True,
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+            try:
+                process = subprocess.run([sys.executable, target.name], cwd=workspace, text=True,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+            except subprocess.TimeoutExpired:
+                return ProbeResult(probe.hypothesis_id, probe.name, "infrastructure_failure", "NOT_RUN",
+                                   "Generated probe timed out after 30 seconds.")
             output = process.stdout.strip()
             if "ImportError" in output or "ModuleNotFoundError" in output or "SyntaxError" in output or "ERROR" in output:
                 return ProbeResult(probe.hypothesis_id, probe.name, "infrastructure_failure", "NOT_RUN",

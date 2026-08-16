@@ -6,6 +6,17 @@ from .orchestrator import AgentRun
 
 
 def render(run: AgentRun) -> str:
+    is_live = run.provenance == "live"
+    artifact_source = "provider-generated" if is_live else "replay-generated"
+    provenance_heading = "LIVE PROVIDER COMPONENTS" if is_live else "REPLAYED COMPONENTS"
+    provenance_note = (
+        "The specialist hypotheses and repair strategies came from the live provider; PatchGap independently "
+        "created isolated workspaces, applied patches, and ran assertions and process commands."
+        if is_live else
+        "The specialist hypotheses, generated-probe artifacts, and repair strategies are recorded deterministic "
+        "replay inputs. Their **execution evidence is live**: PatchGap created isolated workspaces, applied patches, "
+        "and ran assertions and process commands."
+    )
     generated = sum(1 for result in run.probe_results if result.validity == "valid")
     reproduced = sum(1 for result in run.probe_results if result.status == "FAIL")
     verified = sum(1 for result in run.repairs if result.accepted)
@@ -32,7 +43,7 @@ Status: **{status}**
 
 ## TESTS GENERATED
 
-{generated} executable replay-generated probe(s); probes ran independently against a fresh repository copy.
+{generated} executable {artifact_source} probe(s); probes ran independently against a fresh repository copy.
 
 {probe_lines}
 
@@ -52,9 +63,9 @@ Status: **{status}**
 
 Winner: **{winner}**
 
-## REPLAYED COMPONENTS
+## {provenance_heading}
 
-The specialist hypotheses, generated-probe artifacts, and repair strategies are recorded deterministic replay inputs. Their **execution evidence is live**: PatchGap created isolated workspaces, applied patches, and ran assertions and process commands.
+{provenance_note}
 
 ## LIMITATIONS
 
@@ -71,6 +82,11 @@ def write(run: AgentRun, destination: Path) -> str:
 
 def write_scorecard(run: AgentRun, destination: Path) -> str:
     banner = "LIVE CODEX RUN" if run.provenance == "live" else "ILLUSTRATIVE AGENT REPLAY — NOT A LIVE CODEX RUN"
+    provenance_note = (
+        "The provider artifacts and all test and patch execution above completed in fresh workspaces."
+        if run.provenance == "live" else
+        "The specialist artifacts are replayed; all test and patch execution above was performed in fresh workspaces."
+    )
     probe_rows = "\n".join(f"| {item.name} | {item.status} | {item.validity} |" for item in run.probe_results)
     repair_rows = "\n".join(f"| {item.candidate.id} | {'PASS' if item.existing_pass else 'FAIL'} | {'PASS' if all(probe.status == 'PASS' for probe in item.probe_results) else 'FAIL'} | {'ACCEPT' if item.accepted else 'REJECT'} |" for item in run.repairs)
     content = f"""# PATCHGAP AGENT SCORECARD
@@ -93,7 +109,7 @@ Existing public suite: **{'PASS' if run.existing_pass else 'FAIL'}**
 
 Winner: **{run.winner.candidate.id if run.winner else 'None'}**
 
-The specialist artifacts are replayed; all test and patch execution above was performed in fresh workspaces.
+{provenance_note}
 """
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(content)
